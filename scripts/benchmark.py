@@ -336,7 +336,6 @@ def _compute_efficiency_summary(
     ]
     total_score = sum(all_scores)
     num_tasks = len(all_scores)
-    mean_score = statistics.mean(all_scores) if all_scores else 0.0
 
     summary: Dict[str, Any] = {
         "total_tokens": total_tokens,
