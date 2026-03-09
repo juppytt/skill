@@ -219,6 +219,22 @@ def prepare_task_workspace(skill_dir: Path, run_id: str, task: Task, agent_id: s
             except OSError as exc:
                 logger.warning("Failed to remove %s: %s", bootstrap_file, exc)
 
+    # Copy skills from main workspace to benchmark workspace
+    # This enables benchmark agents to use installed skills like nano-pdf
+    main_skills_dir = Path.home() / ".openclaw" / "workspace" / "skills"
+    if main_skills_dir.exists():
+        dest_skills_dir = workspace / "skills"
+        dest_skills_dir.mkdir(parents=True, exist_ok=True)
+        for skill_dir_src in main_skills_dir.iterdir():
+            if skill_dir_src.is_dir():
+                dest_skill_dir = dest_skills_dir / skill_dir_src.name
+                # Copy skill directory
+                import shutil
+                if dest_skill_dir.exists():
+                    shutil.rmtree(dest_skill_dir)
+                shutil.copytree(skill_dir_src, dest_skill_dir)
+                logger.info("Copied skill to benchmark workspace: %s", skill_dir_src.name)
+
     return workspace
 
 
