@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import platform
+import shutil
 import stat
 import subprocess
 import time
@@ -21,6 +22,15 @@ from lib_tasks import Task
 logger = logging.getLogger(__name__)
 
 USE_SHELL = platform.system() == "Windows"
+CONTROL_MARKDOWN_FILES = [
+    "BOOTSTRAP.md",
+    "SOUL.md",
+    "USER.md",
+    "IDENTITY.md",
+    "HEARTBEAT.md",
+    "TOOLS.md",
+    "AGENTS.md",
+]
 
 
 class ModelValidationError(Exception):
@@ -31,6 +41,18 @@ class ModelValidationError(Exception):
 
 MAX_OPENCLAW_MESSAGE_CHARS = int(os.environ.get("PINCHBENCH_MAX_MSG_CHARS", "8000"))
 JUDGE_MAX_MSG_CHARS = int(os.environ.get("PINCHBENCH_JUDGE_MAX_MSG_CHARS", "3000"))
+
+
+def _resolve_openclaw_executable() -> str:
+    configured = os.environ.get("OPENCLAW_PATH")
+    if configured:
+        return configured
+    resolved = shutil.which("openclaw")
+    return resolved or "openclaw"
+
+
+def _openclaw_cmd(*args: str) -> list[str]:
+    return [_resolve_openclaw_executable(), *args]
 
 
 def _coerce_subprocess_output(value: Any) -> str:
@@ -164,11 +186,11 @@ def _get_agent_workspace(agent_id: str) -> Path | None:
     """Get the workspace path for an agent from OpenClaw config."""
     try:
         list_result = subprocess.run(
-            ["openclaw", "agents", "list"],
+            _openclaw_cmd("agents", "list"),
             capture_output=True,
             text=True,
             check=False,
-            shell=USE_SHELL,
+            shell=False,
         )
         if list_result.returncode != 0:
             return None
@@ -208,11 +230,11 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
 
     try:
         list_result = subprocess.run(
-            ["openclaw", "agents", "list"],
+            _openclaw_cmd("agents", "list"),
             capture_output=True,
             text=True,
             check=False,
-            shell=USE_SHELL,
+            shell=False,
         )
     except FileNotFoundError:
         logger.error("openclaw CLI not found while listing agents")
@@ -251,18 +273,17 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
                 workspace_dir,
             )
             subprocess.run(
-                ["openclaw", "agents", "delete", delete_name, "--force"],
+                _openclaw_cmd("agents", "delete", delete_name, "--force"),
                 capture_output=True,
                 text=True,
                 check=False,
-            shell=USE_SHELL,
+                shell=False,
             )
 
     logger.info("Creating OpenClaw agent %s", agent_id)
     try:
         create_result = subprocess.run(
-            [
-                "openclaw",
+            _openclaw_cmd(
                 "agents",
                 "add",
                 agent_id,
@@ -271,11 +292,11 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
                 "--workspace",
                 str(workspace_dir),
                 "--non-interactive",
-            ],
+            ),
             capture_output=True,
             text=True,
             check=False,
-            shell=USE_SHELL,
+            shell=False,
         )
     except FileNotFoundError:
         logger.error("openclaw CLI not found while creating agent")
@@ -294,20 +315,20 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
         bench_agent_dir.mkdir(parents=True, exist_ok=True)
         bench_models = bench_agent_dir / "models.json"
         import shutil as _shutil
+
         _shutil.copy2(main_models, bench_models)
         # Set defaultProvider/defaultModel so OpenClaw uses the requested model
         if "/" in model_id:
             provider_name, model_name = model_id.split("/", 1)
             try:
                 import json as _json
+
                 raw = bench_models.read_text("utf-8-sig")
                 data = _json.loads(raw)
                 data["defaultProvider"] = provider_name
                 data["defaultModel"] = model_name
                 bench_models.write_text(_json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
-                logger.info(
-                    "Set bench agent default model to %s / %s", provider_name, model_name
-                )
+                logger.info("Set bench agent default model to %s / %s", provider_name, model_name)
             except Exception as exc:
                 logger.warning("Failed to set default model in bench models.json: %s", exc)
         logger.info("Copied main agent models.json to bench agent %s", agent_id)
@@ -364,13 +385,11 @@ def prepare_task_workspace(skill_dir: Path, run_id: str, task: Task, agent_id: s
         logger.warning("Could not find agent workspace, using fallback")
         workspace = Path(f"/tmp/pinchbench/{run_id}/{task.task_id}")
 
-    _BOOTSTRAP_FILES = ["SOUL.md", "BOOTSTRAP.md", "USER.md", "IDENTITY.md", "HEARTBEAT.md", "TOOLS.md"]
+    _BOOTSTRAP_FILES = CONTROL_MARKDOWN_FILES
 
-    def _remove_readonly(func, path, _):
     def _remove_readonly(func, path, _):
         try:
             os.chmod(path, stat.S_IWRITE)
-            func(path)
         except OSError:
             pass
         func(path)
@@ -722,8 +741,7 @@ def execute_openclaw_task(
                 break
             try:
                 result = subprocess.run(
-                    [
-                        "openclaw",
+                    _openclaw_cmd(
                         "agent",
                         "--agent",
                         agent_id,
@@ -731,13 +749,13 @@ def execute_openclaw_task(
                         session_id,
                         "--message",
                         session_prompt,
-                    ],
+                    ),
                     capture_output=True,
                     text=True,
                     cwd=str(workspace),
                     timeout=remaining,
                     check=False,
-            shell=USE_SHELL,
+                    shell=False,
                 )
                 stdout += result.stdout
                 stderr += result.stderr
@@ -756,8 +774,7 @@ def execute_openclaw_task(
         # Single-session task: send task.prompt once
         try:
             result = subprocess.run(
-                [
-                    "openclaw",
+                _openclaw_cmd(
                     "agent",
                     "--agent",
                     agent_id,
@@ -765,13 +782,13 @@ def execute_openclaw_task(
                     session_id,
                     "--message",
                     task.prompt,
-                ],
+                ),
                 capture_output=True,
                 text=True,
                 cwd=str(workspace),
                 timeout=timeout_seconds,
                 check=False,
-            shell=USE_SHELL,
+                shell=False,
             )
             stdout = result.stdout
             stderr = result.stderr
@@ -860,7 +877,7 @@ def run_openclaw_prompt(
 
     agent_workspace = _get_agent_workspace(agent_id)
     if agent_workspace and agent_workspace.exists():
-        for bootstrap_file in ["BOOTSTRAP.md", "SOUL.md", "USER.md", "IDENTITY.md", "HEARTBEAT.md"]:
+        for bootstrap_file in CONTROL_MARKDOWN_FILES:
             bp = agent_workspace / bootstrap_file
             if bp.exists():
                 try:
@@ -907,32 +924,22 @@ def run_openclaw_prompt(
             timed_out = True
             break
         try:
-            openclaw_path = os.environ.get("OPENCLAW_PATH", "openclaw")
-            # On Windows, cmd.exe splits command-line arguments at literal newlines,
-            # causing the message to be truncated after the first line.
-            # Escape newlines to literal \n sequences so the full prompt is received.
-            send_chunk = (
-                chunk.replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n")
-                if USE_SHELL
-                else chunk
-            )
             result = subprocess.run(
-                [
-                    openclaw_path,
+                _openclaw_cmd(
                     "agent",
                     "--agent",
                     agent_id,
                     "--session-id",
                     session_id,
                     "--message",
-                    send_chunk,
-                ],
+                    chunk,
+                ),
                 capture_output=True,
                 text=True,
                 cwd=str(workspace),
                 timeout=remaining,
                 check=False,
-                shell=USE_SHELL,
+                shell=False,
             )
             stdout += result.stdout
             stderr += result.stderr
