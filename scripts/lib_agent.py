@@ -1027,15 +1027,22 @@ def _judge_via_openai_compat(
     extra_headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Shared implementation for OpenAI-compatible chat completions APIs."""
-    payload = json.dumps({
+    body: Dict[str, Any] = {
         "model": api_model,
         "messages": [
             {"role": "system", "content": _JUDGE_SYSTEM_MSG},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": 2048,
-    }).encode("utf-8")
+    }
+    # Newer OpenAI models (gpt-5+) require max_completion_tokens instead of max_tokens
+    if endpoint == "https://api.openai.com/v1/chat/completions" and (
+        api_model.startswith("gpt-5") or api_model.startswith("o")
+    ):
+        body["max_completion_tokens"] = 2048
+    else:
+        body["max_tokens"] = 2048
+    payload = json.dumps(body).encode("utf-8")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
