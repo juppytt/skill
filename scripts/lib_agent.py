@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from urllib import error, request
 
 from lib_tasks import Task
+from lib_fws import is_fws_task, fws_available, start_fws, stop_fws
 
 
 logger = logging.getLogger(__name__)
@@ -741,6 +742,14 @@ def execute_openclaw_task(
     # transcript (OpenClaw uses its own UUID-based naming, not our session ID).
     cleanup_agent_sessions(agent_id)
 
+    # Start fws server for GWS tasks
+    fws_env = None
+    if is_fws_task(task.frontmatter):
+        if not fws_available():
+            logger.warning("⚠️ Task %s requires fws but it's not installed (npm install -g @juppytt/fws)", task.task_id)
+        else:
+            fws_env = start_fws()
+
     start_time = time.time()
     workspace = prepare_task_workspace(skill_dir, run_id, task, agent_id)
     session_id = f"{task.task_id}_{int(time.time() * 1000)}"
@@ -894,6 +903,10 @@ def execute_openclaw_task(
                         logger.info("      %s (%d bytes)", f.relative_to(workspace), size)
                     except OSError:
                         logger.info("      %s", f.relative_to(workspace))
+
+    # Stop fws mock server if we started it
+    if fws_env is not None:
+        stop_fws(fws_env)
 
     return {
         "agent_id": agent_id,
@@ -1084,7 +1097,7 @@ def _judge_via_openai_compat(
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": 2048,
+        "max_completion_tokens": 2048,
     }).encode("utf-8")
 
     headers = {
