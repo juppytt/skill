@@ -1084,7 +1084,7 @@ def _judge_via_openai_compat(
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": 2048,
+        "max_completion_tokens": 2048,
     }).encode("utf-8")
 
     headers = {
